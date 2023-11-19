@@ -5,11 +5,33 @@ use bevy::{
     text::{BreakLineOn, Text2dBounds, TextLayoutInfo}
 };
 use bevy_mod_picking::prelude::*;
+use array2d::Array2D;
 
 
 pub const FIELD_SIZE:f32 = 50.0;
-pub const ROW_COUNT:u16 = 9;
-pub const COL_COUNT:u16 = 9;
+pub const ROW_COUNT:usize = 9;
+pub const COL_COUNT:usize = 9;
+
+pub const FIELD_COLOR:Color = Color::WHITE;
+pub const FIXED_FIELD_COLOR:Color = Color::rgb(0.75, 0.75, 0.75);
+pub const HOVER_COLOR:Color = Color::rgb(0.35, 0.75, 0.35);
+pub const PRESSED_COLOR:Color = Color::DARK_GRAY;
+
+pub const VAL_COLOR:Color = Color::DARK_GRAY;
+pub const FIXED_VAL_COLOR:Color = Color::BLACK;
+pub const TEXT_COLOR:Color = Color::BLACK;
+
+// pub static mut playfield:[[u8;9];9] = [
+//     [0,0,0,1,1,1,2,2,2,],
+//     [0,0,0,1,1,1,2,2,2,],
+//     [0,0,0,1,1,1,2,2,2,],
+//     [3,3,3,4,4,4,5,5,5,],
+//     [3,3,3,4,4,4,5,5,5,],
+//     [3,3,3,4,4,4,5,5,5,],
+//     [6,6,6,7,7,7,8,8,8,],
+//     [6,6,6,7,7,7,8,8,8,],
+//     [6,6,6,7,7,7,8,8,8,],
+// ];
 
 fn main() {
     App::new()
@@ -18,7 +40,8 @@ fn main() {
     // uncomment the next line to get the debug cursor tooltips
     //.add_plugins(DefaultPickingPlugins)
     .add_systems(Startup, setup)
-    .add_systems(Update, update_button_colors)
+    .add_systems(Update, button_interactions)
+    .add_systems(Update, read_values)
     .run();
 }
 
@@ -26,9 +49,15 @@ pub fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
+    println!("s2");
     commands.spawn(Camera2dBundle::default());
 
-    let font = asset_server.load("fonts/FiraSans-Bold.ttf");
+    let playfield = Playfield {
+        values: Array2D::filled_with(0,ROW_COUNT,COL_COUNT),
+        selected_field: None
+    };
+    commands.insert_resource(playfield.clone());
+
     commands.spawn(
         NodeBundle {
             style: Style {
@@ -38,30 +67,26 @@ pub fn setup(
                 align_items: AlignItems::Center,
                 grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(0.2)],
                 grid_template_rows: vec![
-                    GridTrack::px(20.),
+                    GridTrack::px(25.),
                     GridTrack::flex(1.0),
-                    GridTrack::px(20.),
+                    GridTrack::px(25.),
                 ],
                 ..default()
             },
-            background_color: BackgroundColor(Color::WHITE),
+            background_color: BackgroundColor(Color::DARK_GRAY),
             ..default()
         }
     ).with_children(|builder| {
         // Header
         builder.spawn(TextBundle::from_section(
-            "test",
-            TextStyle {
-                font: font.clone(),
-                font_size: 18.0,
-                color: Color::GRAY,
-            }
+            "",
+            get_text_style(&asset_server)
         ).with_style(
             Style {
                 grid_column: GridPlacement::span(2),
                 ..default()
             }
-        ));
+        ).with_text_alignment(TextAlignment::Left));
 
         // Main content
         builder.spawn((
@@ -73,10 +98,8 @@ pub fn setup(
                     height: Val::Percent(100.0),
                     ..default()
                 },
-                background_color: BackgroundColor(Color::DARK_GRAY),
                 ..default()
             },
-            //Pickable::IGNORE
         )).with_children(|builder| {
             builder.spawn((
                 NodeBundle {
@@ -91,10 +114,8 @@ pub fn setup(
                         column_gap: Val::Px(0.0),
                         ..default()
                     },
-                    background_color: BackgroundColor(Color::DARK_GRAY),
                     ..default()
                 },
-                //Pickable::IGNORE
             )).with_children(|builder| {
                 for quad_row in 0..3 {
                     for quad_col in 0..3 {
@@ -112,15 +133,14 @@ pub fn setup(
                                     padding: UiRect::all(Val::Px(2.0)),
                                     ..default()
                                 },
-                                background_color: BackgroundColor(Color::DARK_GRAY),
                                 ..default()
                             },
-                            //Pickable::IGNORE
                         )).with_children(|builder| {
                             for field_row in 0..3 {
                                 for field_col in 0..3 {
                                     let row = quad_row * 3 + field_row;
                                     let col = quad_col * 3 + field_col;
+                                    let fixed = playfield.values[(row, col)] > 0;
 
                                     builder.spawn((
                                         NodeBundle {
@@ -129,54 +149,66 @@ pub fn setup(
                                                 padding: UiRect::all(Val::Px(1.0)),
                                                 ..default()
                                             },
-                                            background_color: BackgroundColor(Color::DARK_GRAY),
                                             ..default()
                                         },
-                                        //Pickable::IGNORE
                                     ))
                                     .with_children(|builder| {
-                                        builder.spawn((
-                                            ButtonBundle {
-                                                style: Style {
-                                                    display: Display::Grid,
-                                                    aspect_ratio: Some(1.0),
-                                                    width: Val::Px(FIELD_SIZE),
-                                                    ..default()
-                                                },
-                                                background_color: BackgroundColor(Color::WHITE),
+                                        let button_bundle = ButtonBundle {
+                                            style: Style {
+                                                aspect_ratio: Some(1.0),
+                                                width: Val::Px(FIELD_SIZE),
+                                                justify_content: JustifyContent::Center,
+                                                align_items: AlignItems::Center,
                                                 ..default()
                                             },
-                                            Field {
-                                                row: row,
-                                                col: col
-                                            },
-                                            On::<Pointer<Click>>::run(move || info!("Button pressed!")),
-                                            // Buttons should not deselect other things:
-                                            NoDeselect,
-                                        ));
-                                        // .with_children(|builder| {
-                                        //     builder.spawn((
-                                        //         TextBundle {
-                                        //             text: Text {
-                                        //                 sections: vec![
-                                        //                     TextSection::new(
-                                        //                         format!("{row},{col}"),
-                                        //                         style.clone()
-                                        //                     )
-                                        //                 ],
-                                        //                 alignment: TextAlignment::Center,
-                                        //                 ..default()
-                                        //             },
-                                        //             ..default()
-                                        //         },
-                                        //         Value
-                                        //     ));
-                                        // });
+                                            background_color: BackgroundColor(FIELD_COLOR),
+                                            ..default()
+                                        };
+                                        let mut parent;
+                                        if playfield.values[(row, col)] > 0 {
+                                            parent = builder.spawn((
+                                                button_bundle,
+                                                FixedField {
+                                                    row: row,
+                                                    col: col,
+                                                }
+                                            ));
+                                        } else {
+                                            parent = builder.spawn((
+                                                button_bundle,
+                                                Field {
+                                                    row: row,
+                                                    col: col,
+                                                    val: Option::None,
+                                                    pressed: false,
+                                                }
+                                            ));
+                                        };
+                                        parent.with_children(|builder| {
+                                            builder.spawn((
+                                                TextBundle {
+                                                    text: Text {
+                                                        sections: vec![
+                                                            TextSection::new(
+                                                                "",
+                                                                get_field_text_style(&asset_server, fixed).clone()
+                                                            )
+                                                        ],
+                                                        alignment: TextAlignment::Center,
+                                                        ..default()
+                                                    },
+                                                    ..default()
+                                                },
+                                                Value {
+                                                    row: row,
+                                                    col: col,
+                                                },
+                                            ));
+                                        });
                                     });
                                 }
                             }
                         });
-                        
                     }
                 }
             });
@@ -190,147 +222,93 @@ pub fn setup(
                 height: Val::Percent(100.0),
                 ..default()
             },
-            background_color: BackgroundColor(Color::BLACK),
             ..default()
         });
     });
 }
 
-/// Use the [`PickingInteraction`] state of each button to update its color.
-fn update_button_colors(
-    mut buttons: Query<(Option<&PickingInteraction>, &mut BackgroundColor), With<Button>>,
+fn button_interactions(
+    mut buttons: Query<(&Interaction, &mut BackgroundColor, &mut Field), With<Button>>,
+    mut playfield: ResMut<Playfield>
 ) {
-    for (interaction, mut button_color) in &mut buttons {
+    for (interaction, mut button_color, mut field) in &mut buttons {
         *button_color = match interaction {
-            Some(PickingInteraction::Pressed) => Color::rgb(0.35, 0.75, 0.35),
-            Some(PickingInteraction::Hovered) => Color::rgb(0.75, 0.75, 0.75),
-            Some(PickingInteraction::None) | None => Color::WHITE,
-        }
-        .into();
+            Interaction::Pressed => {
+                if !field.pressed {
+                    field.pressed = true;
+                    let v = playfield.values[(field.row, field.col)];
+                    playfield.values[(field.row, field.col)] = (v + 1)%10;
+                }               
+
+                PRESSED_COLOR
+            },
+            Interaction::Hovered => {
+                field.pressed = false;
+                HOVER_COLOR
+            },
+            Interaction::None => {
+                field.pressed = false;
+                FIELD_COLOR
+            },
+        }.into();
     }
 }
 
-pub fn hover(
-    mut button_query: Query<&mut Style, With<Field>>
+fn read_values(
+    mut buttons: Query<(&mut Text, &Value)>,
+    playfield: Res<Playfield>
 ) {
-    for mut button in &mut button_query {
-        
-        println!("{:?}", button);
-    }
-}
+    for (mut text, value ) in &mut buttons {
+        let v = playfield.values[(value.row, value.col)];
 
-/* pub fn hover(
-    mut commands: Commands,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-    q_parent: Query<&Field>,
-    q_child: Query<(&Parent, (Entity, With<Text>))>,
-) {
-    let window = window_query.single();
-
-    let Some(position) = window.cursor_position() else { return };
-    // println!("Cursor is inside the primary window, at {:?}", position);
-    // let x = window.width()/2.0 - 226.0;
-    // let y = window.height()/2.0 - 226.0;
-    let x = position.x;
-    let y = position.y;
-
-    
-    for (parent, (text_entity, _)) in q_child.iter() {
-        let field = q_parent.get(parent.get()).unwrap();
-
-        let row = field.row;
-        let col = field.col;
-
-        let x_min = x + ((col*50) as f32);
-        let y_min = y + ((row*50) as f32);
-        
-        if position.x > x_min && position.x < x_min + 50.0 && position.y > y_min && position.y < y_min + 50.0 {
-            println!("hover {:?}", position);
-            let mut field_e = commands.entity(parent.get());
-            field_e.remove_children(&[text_entity]);
-            
-            // field_e.add_child(
-            //     commands.spawn(
-            //         Text {
-            //             sections: vec![TextSection::new(
-            //                 "",
-            //                 font.style.clone(),
-            //             )],
-            //             alignment: TextAlignment::Center,
-            //             linebreak_behavior: BreakLineOn::NoWrap,
-            //         }
-            //     ).id()
-            // );
+        if v > 0 {
+            text.sections[0].value = format!("{v}");
+        } else {
+            text.sections[0].value = format!("");
         }
     }
-} */
-
-/* pub fn print_fields(query: Query<&Field>) {
-    for field in query.iter() {
-        println!("x:{}, y:{}, v:{}", field.row, field.col, field.val)
-    }
-} */
-
-#[derive(Resource)]
-pub struct Font {
-    pub style:TextStyle,
 }
 
-#[derive(Component, Default, Debug)]
+fn get_field_text_style(asset_server: &Res<AssetServer>, fixed: bool) -> TextStyle {
+    let font = asset_server.load("fonts/FiraSans-Bold.ttf");
+    TextStyle {
+        font: font.clone(),
+        font_size: 38.0,
+        color: if fixed {FIXED_VAL_COLOR} else {VAL_COLOR},
+    }
+}
+
+fn get_text_style(asset_server: &Res<AssetServer>) -> TextStyle {
+    let font = asset_server.load("fonts/FiraSans-Bold.ttf");
+    TextStyle {
+        font: font.clone(),
+        font_size: 20.0,
+        color: TEXT_COLOR,
+    }
+}
+
+#[derive(Resource, Clone)]
+pub struct Playfield {
+    pub values: Array2D<u8>,
+    pub selected_field: Option<Field>,
+}
+
+#[derive(Component, Clone)]
 pub struct Field {
+    pub row: usize,
+    pub col: usize,
+    pub val: Option<u8>,
+    pub pressed: bool,
+}
+
+#[derive(Component)]
+pub struct FixedField {
     pub row: usize,
     pub col: usize,
 }
 
 #[derive(Component)]
-pub struct Value;
-
-// #[derive(Bundle, Clone, Default)]
-// pub struct Text2dBundle {
-//     /// Contains the text.
-//     pub text: Text,
-//     /// How the text is positioned relative to its transform.
-//     pub text_anchor: Anchor,
-//     /// The maximum width and height of the text.
-//     pub text_2d_bounds: Text2dBounds,
-//     /// The transform of the text.
-//     pub transform: Transform,
-//     /// The global transform of the text.
-//     pub global_transform: GlobalTransform,
-//     /// The visibility properties of the text.
-//     pub visibility: Visibility,
-//     /// Inherited visibility of an entity.
-//     pub inherited_visibility: InheritedVisibility,
-//     /// Algorithmically-computed indication of whether an entity is visible and should be extracted for rendering
-//     pub view_visibility: ViewVisibility,
-//     /// Contains the size of the text and its glyph's position and scale data. Generated via [`TextPipeline::queue_text`]
-//     pub text_layout_info: TextLayoutInfo,
-//     pub sprite: SpriteBundle,
-// }
-
-// #[derive(Bundle, Clone, Default)]
-// pub struct SpriteBundle {
-//     pub sprite: Sprite,
-//     pub transform: Transform,
-//     pub global_transform: GlobalTransform,
-//     pub texture: Handle<Image>,
-//     /// User indication of whether an entity is visible
-//     pub visibility: Visibility,
-//     /// Inherited visibility of an entity.
-//     pub inherited_visibility: InheritedVisibility,
-//     /// Algorithmically-computed indication of whether an entity is visible and should be extracted for rendering
-//     pub view_visibility: ViewVisibility,
-//     pub text: Text2dBundle,
-// }
-
-#[derive(Bundle, Default)]
-struct FieldBundle {
-    pub field: Field,
-    pub sprite: SpriteBundle,
-    //pub text: Text,
-    // pub transform: Transform,
-    // pub global_transform: GlobalTransform,
-    // pub visibility: Visibility,
-    // pub inherited_visibility: InheritedVisibility,
-    // pub view_visibility: ViewVisibility,
+pub struct Value {
+    pub row: usize,
+    pub col: usize,
 }
