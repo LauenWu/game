@@ -31,190 +31,99 @@ const QUADS:[[u8;9];9] = [
     [6,6,6,7,7,7,8,8,8,],
     [6,6,6,7,7,7,8,8,8,],
 ];
-
-struct FieldIterator {
-    fields: [(u8, u8); FIELDS_COUNT as usize],
-    current_index: usize,
-}
-
-impl FieldIterator {
-    fn new() -> Self {
-        let mut fields = FIELDS.clone();
-        //fields.shuffle(&mut thread_rng());
-        FieldIterator {fields, current_index: 0,}
-    }
-}
-
-impl Iterator for FieldIterator {
-    type Item = (u8, u8);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.fields.len() > self.current_index  {
-            let number = self.fields[self.current_index];
-            self.current_index += 1;
-            return Some(number);
-        } else {
-            return None;
-        }
-    }
-}
+const VALUES:[u8;9] = [1,2,3,4,5,6,7,8,9];
 
 pub fn solve(playfield: &mut Playfield) {
     playfield.solve();
 }
 
-trait Solvable {
-    fn get_cursor(&self) -> u8;
-    fn possible_moves_at(&self, field: (u8, u8)) -> Vec<u8>;
-    fn make_move_at(&mut self, field: (u8, u8), mov:u8, values: &mut Array2D<u8>);
-    fn revert_move_at(&mut self, field: (u8, u8), mov:u8, values: &mut Array2D<u8>);
-    fn check(&mut self, values: &Array2D<u8>);
-    fn is_solved(&self) -> bool;
-    fn solve(&mut self);
-    fn get_field(&self, cursor: u8) -> (u8, u8);
-    fn inc_cursor(&mut self);
-    fn dec_cursor(&mut self);
-
-    fn solve_(&mut self, values: &mut Array2D<u8>) {
-        println!("in");
-        let cursor = self.get_cursor();
-        if cursor < 81 {
-            let field = self.get_field(cursor);
-            let mut possible_moves = self.possible_moves_at(field);
-            println!("{:?}, {:?}", cursor, possible_moves);
-
-            //possible_moves.shuffle(&mut thread_rng());
-
-            for possible_move in possible_moves {
-                self.make_move_at(field, possible_move, values);
-                self.inc_cursor();
-                self.solve_(values);
-                if self.is_solved() {
-                    return;
-                }
-                self.dec_cursor();
-                self.revert_move_at(field, possible_move, values);
-            }
-        } else {
-            // field iterator has no next           
-            self.check(values);
-        }
-        println!("ret")
-    }
-}
-
 #[derive(Resource)]
 pub struct Playfield {
     pub values: Array2D<u8>,
-    blocked_rows: [BitArray<[u16; 1], Msb0>; 9],
-    blocked_cols: [BitArray<[u16; 1], Msb0>; 9],
-    blocked_quads: [BitArray<[u16; 1], Msb0>; 9],
-    solved: bool,
-    cursor: u8,
+    poss_rows: [u16; 9],
+    poss_cols: [u16; 9],
+    poss_quads: [u16; 9],
+    cursor: usize,
     fields: [(u8, u8); FIELDS_COUNT as usize],
+    values_map: [u16; 9],
+    value_random_mask: [u8; 9],
 }
 
 impl Playfield {
     pub fn new() -> Self {
-        let arr = bitarr!(u16, Msb0; 0; 9);
-        let b: [BitArray<[u16; 1], Msb0>; 9] = [
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),
-            arr.clone(),            
-        ];
-
         let mut fields = FIELDS.clone();
         //fields.shuffle(&mut thread_rng());
 
+        let mut value_random_mask = VALUES.clone();
+        value_random_mask.shuffle(&mut thread_rng());
+        // maps from 00010 to 2
+        // let mut digit_map: [u8; (1<<8)+1] = [0; (1<<8)+1];
+
+        // maps from 0 to 00001
+        let mut values_map: [u16; 9] = [0; 9];
+
+        for i in 0..9 {
+            let ii: u16 = 1 << i;
+            // i:0 -> ii:1
+            // digit_map[ii as usize] = i + 1;
+            values_map[i as usize] = ii; 
+        }
+
         Playfield {
             values: Array2D::filled_with(0, ROW_COUNT as usize, COL_COUNT as usize),
-            blocked_rows: b.clone(),
-            blocked_cols: b.clone(),
-            blocked_quads: b.clone(),
-            solved: false,
+            poss_rows: [511u16; 9],
+            poss_cols: [511u16; 9],
+            poss_quads: [511u16; 9],
             cursor: 0,
             fields,
+            values_map,
+            value_random_mask,
         }
     }
-}
 
-impl Solvable for Playfield {
-    fn possible_moves_at(&self, field: (u8, u8)) -> Vec<u8> {
-        let (row, col) = field;
-        let blocked = self.blocked_rows[row as usize]
-            .bitor(self.blocked_cols[col as usize])
-            .bitor(self.blocked_quads[QUADS[row as usize][col as usize] as usize]);
-        blocked[0..9].iter_zeros().map(|a| (a + 1) as u8).collect::<Vec<u8>>()
-    }
-
-    fn make_move_at(&mut self, field: (u8, u8), mov:u8, values: &mut Array2D<u8>) {
-        let row = field.0 as usize;
-        let col = field.1 as usize;
-        self.blocked_rows[row].set((mov-1) as usize, true);
-        self.blocked_cols[col].set((mov-1) as usize, true);
-        self.blocked_quads[QUADS[row][col] as usize].set((mov-1) as usize, true);
-        values[(row, col)] = mov;
-    }
-
-    fn revert_move_at(&mut self, field: (u8, u8), mov:u8, values: &mut Array2D<u8>) {
-        let row = field.0 as usize;
-        let col = field.1 as usize;
-        self.blocked_rows[row as usize].set((mov-1) as usize, false);
-        self.blocked_cols[col as usize].set((mov-1) as usize, false);
-        self.blocked_quads[QUADS[row as usize][col as usize] as usize].set((mov-1) as usize, false);
-        values[(row, col)] = 0;
-    }
-
-    fn check(&mut self, values: &Array2D<u8>) {
-        let mut solved = true;
-        for row in values.rows_iter() {
-            for field in row {
-                if *field == 0 {
-                    solved = false;
-                }
-            }
-        }
-        self.values = values.clone();
-        self.solved = solved;
-
-        if solved {
+    fn solve_(&mut self, values: &mut Array2D<u8>) -> bool {
+        if self.cursor >= 81 {
             for row in 0..9 {
                 for col in 0..9 {
-                    print!("{:?} ", values[(row, col)]);
+                    self.values[(row, col)] = self.value_random_mask[(values[(row, col)] - 1) as usize]
                 }
-                println!("");
             }
+            //self.values = values.clone();
+            return true;
         }
-    }
+        let cursor = self.cursor;
+        let field = self.fields[cursor];
+        let row = field.0 as usize;
+        let col = field.1 as usize;
+        let quad = QUADS[row][col] as usize;
 
-    fn is_solved(&self) -> bool {
-        self.solved
+        let poss: u16 = self.poss_rows[row] & self.poss_cols[col] & self.poss_quads[quad];
+
+        for mov_zero_based in poss.view_bits::<Lsb0>().iter_ones() {
+            let mov_bin = self.values_map[mov_zero_based];
+            let mov_bin_inv = !mov_bin;
+
+            self.poss_rows[row] &= mov_bin_inv;
+            self.poss_cols[col] &= mov_bin_inv;
+            self.poss_quads[quad] &= mov_bin_inv;
+            values[(row, col)] = mov_zero_based as u8 + 1;
+            self.cursor += 1;
+
+            if self.solve_(values) {
+                return true;
+            }
+
+            self.cursor -= 1;
+            values[(row, col)] = 0;
+            self.poss_rows[row] |= mov_bin;
+            self.poss_cols[col] |= mov_bin;
+            self.poss_quads[quad] |= mov_bin;
+        }
+        return false;
     }
 
     fn solve(&mut self) {
         self.solve_(&mut self.values.clone());
-    }
-
-    fn get_cursor(&self) -> u8 {
-        self.cursor
-    }
-
-    fn get_field(&self, cursor: u8) -> (u8, u8) {
-        self.fields[cursor as usize]
-    }
-
-    fn inc_cursor(&mut self) {
-        self.cursor += 1;
-    }
-
-    fn dec_cursor(&mut self) {
-        self.cursor -= 1;
     }
 }
 
