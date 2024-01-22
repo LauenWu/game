@@ -264,12 +264,14 @@ pub fn field_buttons(
 }
 
 pub fn generate_button(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<GenerateButton>)>
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<GenerateButton>)>,
+    mut playfield: ResMut<Playfield>
 ) {
     if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
         match *interaction {
             Interaction::Pressed => {
                 println!("generate");
+                generate(&mut playfield);
             }
             Interaction::Hovered => {
                *backgroud_color = HOVER_COLOR.into();
