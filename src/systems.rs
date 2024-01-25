@@ -242,6 +242,58 @@ pub fn setup(
                     ..default()
                 });
             });
+
+            builder.spawn((
+                ButtonBundle {
+                    style: Style {
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        width: Val::Percent(100.0),
+                        margin: UiRect::all(Val::Px(4.0)),
+                        height: Val::Px(35.0),
+                        ..default()
+                    },
+                    background_color: BackgroundColor(MENU_BUTTON_COLOR),
+                    ..default()
+                },
+                CountButton
+            ))
+            .with_children(|builder| {
+                builder.spawn(TextBundle {
+                    text: Text {
+                        sections: vec![
+                            TextSection::new(
+                                "count",
+                                get_text_style(&asset_server).clone()
+                            )
+                        ],
+                        alignment: TextAlignment::Center,
+                        ..default()
+                    },
+                    ..default()
+                });
+            });
+
+            builder.spawn((
+                TextBundle {
+                    text: Text {
+                        sections: vec![
+                            TextSection::new(
+                                format!("y"),
+                                TextStyle {
+                                    font: asset_server.load("fonts/FiraSans-Bold.ttf").clone(),
+                                    font_size: 24.0,
+                                    color: FIELD_COLOR,
+                                }
+                            )
+                        ],
+                        alignment: TextAlignment::Center,
+                        ..default()
+                    },
+                    ..default()
+                },
+                StatusComponent
+            ));
         });
     });
 }
@@ -254,7 +306,10 @@ pub fn field_buttons(
         *button_color = match interaction {
             Interaction::Pressed => {
                 let v = playfield.values[(field.row, field.col)];
-                playfield.values[(field.row, field.col)] = (v + 1)%10;
+                playfield.set_value(field.row, field.col, 0);
+                if v != 0 {
+                    playfield.set_value(field.row, field.col, (v + 1)%10);
+                }
                 PRESSED_COLOR
             },
             Interaction::Hovered => HOVER_COLOR,
@@ -270,8 +325,7 @@ pub fn generate_button(
     if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
         match *interaction {
             Interaction::Pressed => {
-                println!("generate");
-                generate(&mut playfield);
+                playfield.generate();
             }
             Interaction::Hovered => {
                *backgroud_color = HOVER_COLOR.into();
@@ -290,8 +344,28 @@ pub fn solve_button(
     if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
         match *interaction {
             Interaction::Pressed => {
-                println!("solve");
-                solve(&mut playfield);
+                playfield.solve();
+            }
+            Interaction::Hovered => {
+               *backgroud_color = HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *backgroud_color = MENU_BUTTON_COLOR.into();
+             }
+        }
+    }
+}
+
+pub fn count_button(
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<CountButton>)>,
+    mut playfield: ResMut<Playfield>, mut status: ResMut<Status>
+) {
+    if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                println!("count");
+                let count = playfield.count_solutions();
+                status.text = format!("{count}");
             }
             Interaction::Hovered => {
                *backgroud_color = HOVER_COLOR.into();
@@ -315,6 +389,15 @@ pub fn read_values(
         } else {
             text.sections[0].value = format!("");
         }
+    }
+}
+
+pub fn read_status(
+    mut buttons: Query<(&mut Text, With<StatusComponent>)>,
+    status: Res<Status>
+) {
+    for (mut text, _ ) in &mut buttons {
+        text.sections[0].value = status.text.clone();
     }
 }
 

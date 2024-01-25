@@ -24,3 +24,9 @@ pub struct SolveButton;
 
 #[derive(Component)]
 pub struct GenerateButton;
+
+#[derive(Component)]
+pub struct CountButton;
+
+#[derive(Component)]
+pub struct StatusComponent;
