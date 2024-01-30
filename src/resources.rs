@@ -145,10 +145,7 @@ impl Playfield {
 
     fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
         if removed_count >= LEVEL {
-            if self.count_solutions() == 1 {
-                return true;
-            }
-            return false;
+            return true;
         }
 
         if cursor >= 81 {
@@ -164,6 +161,12 @@ impl Playfield {
         let mov_zero_based = (mov - 1) as usize;
 
         self.reset_value_(row, col, quad, mov_zero_based);
+
+        if self.count_solutions() > 1 {
+            self.set_value_(row, col, quad, mov_zero_based);
+            return false;
+        }
+
         // println!("{}{} delete field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
         if self.generate_(fields_queue, cursor + 1, removed_count + 1) {
             return true;
