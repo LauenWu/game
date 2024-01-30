@@ -42,7 +42,7 @@ const VALUES_BIN_INV:[u16;9] = [
     0b1111111011111111,
 ];
 
-const LEVEL:u8 = 45;
+const LEVEL:u8 = 55;
 
 #[derive(Resource)]
 pub struct Playfield {
@@ -145,7 +145,14 @@ impl Playfield {
 
     fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
         if removed_count >= LEVEL {
-            return true;
+            if self.count_solutions() == 1 {
+                return true;
+            }
+            return false;
+        }
+
+        if removed_count > 30 && self.count_solutions() > 1 {
+            return false;
         }
 
         if cursor >= 81 {
@@ -162,10 +169,7 @@ impl Playfield {
 
         self.reset_value_(row, col, quad, mov_zero_based);
 
-        if self.count_solutions() > 1 {
-            self.set_value_(row, col, quad, mov_zero_based);
-            return false;
-        }
+        //print_recursion_step(cursor, "-");
 
         // println!("{}{} delete field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
         if self.generate_(fields_queue, cursor + 1, removed_count + 1) {
