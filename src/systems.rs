@@ -11,7 +11,6 @@ pub fn setup(
     asset_server: Res<AssetServer>,
     playfield: Res<Playfield>,
 ) {
-    println!("s2");
     commands.spawn(Camera2dBundle::default());
 
     commands.spawn(
@@ -305,10 +304,10 @@ pub fn field_buttons(
     for (interaction, mut button_color, field) in &mut buttons {
         *button_color = match interaction {
             Interaction::Pressed => {
-                let v = playfield.values[(field.row, field.col)];
+                let v = (playfield.values[(field.row, field.col)] + 1) % 10;
                 playfield.set_value(field.row, field.col, 0);
                 if v != 0 {
-                    playfield.set_value(field.row, field.col, (v + 1)%10);
+                    playfield.set_value(field.row, field.col, v);
                 }
                 PRESSED_COLOR
             },

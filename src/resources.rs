@@ -42,30 +42,23 @@ const VALUES_BIN_INV:[u16;9] = [
     0b1111111011111111,
 ];
 
-const LEVEL:u8 = 50;
+const LEVEL:u8 = 45;
 
 #[derive(Resource)]
 pub struct Playfield {
     pub values: Array2D<u8>,
+    errors: Array2D<bool>,
     poss_rows: [u16; 9],
     poss_cols: [u16; 9],
     poss_quads: [u16; 9],
     solved: bool,
 }
 
-fn p(cursor:usize, sign:&str) {
-    let mut i = 0;
-    while i < cursor {
-        print!("{sign}");
-        i += 1;
-    }
-    println!("{sign}");
-}
-
 impl Playfield {
     pub fn new() -> Self {
         Playfield {
             values: Array2D::filled_with(0, ROW_COUNT as usize, COL_COUNT as usize),
+            errors: Array2D::filled_with(false, ROW_COUNT as usize, COL_COUNT as usize),
             poss_rows: [0b1111111111111111u16; 9],
             poss_cols: [0b1111111111111111u16; 9],
             poss_quads: [0b1111111111111111u16; 9],
@@ -73,38 +66,93 @@ impl Playfield {
         }
     }
 
-    pub fn set_value(&mut self, row:usize, col:usize, val:u8) {
-        let quad = QUADS[row][col] as usize;
-        let current_val = self.values[(row, col)];
+    fn get_possible_moves(&mut self, row:usize, col:usize) -> Option<Vec<usize>> {
+        let val: u8 = self.values[(row, col)];
+        if val > 0 {
+            return Option::None;
+        }
         
-        if val == current_val {
+        let quad = QUADS[row][col] as usize;
+        let poss:u16 = self.poss_rows[row] & self.poss_cols[col] & self.poss_quads[quad];
+        return Option::Some(poss.view_bits::<Lsb0>()[0..9].iter_ones().collect());
+    }
+
+    pub fn set_value(&mut self, row:usize, col:usize, mov:u8) {
+        if mov == 0 {
+            self.reset_value(row, col);
             return;
         }
 
-        if val == 0 {
-            let mov_zero_based = (current_val - 1) as usize;
-            let mov_bin = VALUES_BIN[mov_zero_based];
-            self.values[(row, col)] = 0;
-            self.poss_rows[row] |= mov_bin;
-            self.poss_cols[col] |= mov_bin;
-            self.poss_quads[quad] |= mov_bin;
-            return;
+        let current_val = self.values[(row, col)];
+        if current_val > 0 {
+            self.reset_value(row, col);
         }
 
-        let mov_zero_based = (val - 1) as usize;
+        let mov_zero_based = (mov - 1) as usize;
+        match self.get_possible_moves(row, col) {
+            Some(moves) => {
+                if moves.contains(&mov_zero_based) {
+                    let quad = QUADS[row][col] as usize;
+                    self.set_value_(row, col, quad, mov_zero_based);
+                } else {
+                    self.errors[(row, col)] = true;
+                    self.values[(row, col)] = mov;
+                }
+            },
+            None => {
+                self.errors[(row, col)] = true;
+                self.values[(row, col)] = mov;
+            }
+        }
+
+        
+    }
+
+    fn set_value_(&mut self, row:usize, col:usize, quad:usize, mov_zero_based:usize) {        
         let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
+
         self.poss_rows[row] &= mov_bin_inv;
         self.poss_cols[col] &= mov_bin_inv;
         self.poss_quads[quad] &= mov_bin_inv;
-        self.values[(row, col)] = val;
+        self.values[(row, col)] = (mov_zero_based + 1) as u8;
     }
 
-    fn generate_(&mut self, values: &mut Array2D<u8>, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> Option<Array2D<u8>> {
-        if removed_count > LEVEL {
-            if self.multiple_solutions_(values, cursor) > 1 {
-                return Option::None;
+    pub fn reset_value(&mut self, row:usize, col:usize) {
+        let current_val = self.values[(row, col)];
+
+        if current_val == 0 {
+            return;
+        }
+
+        if self.errors[(row, col)] {
+            self.errors[(row, col)] = false;
+            self.values[(row, col)] = 0;
+            return;
+        }
+
+        let quad = QUADS[row][col] as usize;
+        let mov_zero_based = (current_val - 1) as usize;
+        self.reset_value_(row, col, quad, mov_zero_based)
+    }
+
+    fn reset_value_(&mut self, row:usize, col:usize, quad:usize, mov_zero_based:usize) {
+        let mov_bin = VALUES_BIN[mov_zero_based];
+        self.values[(row, col)] = 0;
+        self.poss_rows[row] |= mov_bin;
+        self.poss_cols[col] |= mov_bin;
+        self.poss_quads[quad] |= mov_bin;
+    }
+
+    fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
+        if removed_count >= LEVEL {
+            if self.count_solutions() == 1 {
+                return true;
             }
-            return Option::Some(values.clone());
+            return false;
+        }
+
+        if cursor >= 81 {
+            return false;
         }
 
         let field = FIELDS[fields_queue[cursor]];
@@ -112,80 +160,52 @@ impl Playfield {
         let col = field.1 as usize;
         let quad = QUADS[row][col] as usize;
 
-        let mov = values[(row, col)];
+        let mov = self.values[(row, col)];
         let mov_zero_based = (mov - 1) as usize;
-        let mov_bin = VALUES_BIN[mov_zero_based];
-        let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
 
-        values[(row, col)] = 0;
-        self.poss_rows[row] |= mov_bin;
-        self.poss_cols[col] |= mov_bin;
-        self.poss_quads[quad] |= mov_bin;
-
+        self.reset_value_(row, col, quad, mov_zero_based);
         // println!("{}{} delete field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
-        let solution = self.generate_(values, fields_queue, cursor + 1, removed_count + 1);
-        if solution.is_some() {
-            return solution;
+        if self.generate_(fields_queue, cursor + 1, removed_count + 1) {
+            return true;
         }
 
         // println!("{}{} reset field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
-        self.poss_rows[row] &= mov_bin_inv;
-        self.poss_cols[col] &= mov_bin_inv;
-        self.poss_quads[quad] &= mov_bin_inv;
-        values[(row, col)] = mov;
-        return self.generate_(values, fields_queue, cursor + 1, removed_count);
+        self.set_value_(row, col, quad, mov_zero_based);
+        return self.generate_(fields_queue, cursor + 1, removed_count);
     }
 
-    fn find_solution_(&mut self, values: &mut Array2D<u8>, cursor:usize) -> Option<Array2D<u8>> {
+    fn solve_(&mut self, cursor:usize) -> bool {
         if cursor >= 81 {
-            return Option::Some(values.clone());
+            return true;
         }
         let field = FIELDS[cursor];
         let row = field.0 as usize;
         let col = field.1 as usize;
         let quad = QUADS[row][col] as usize;
 
-        let field_val = values[(row,col)];
-        if field_val > 0 {
-            let option = self.find_solution_(values, cursor + 1);
-            if option.is_some() {
-                return option;     
-            }
-        } else {
-            let poss = self.poss_rows[row] & self.poss_cols[col] & self.poss_quads[quad];
-            for mov_zero_based in poss.view_bits::<Lsb0>()[0..9].iter_ones() {
-                let mov_bin = VALUES_BIN[mov_zero_based];
-                let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
-    
-                self.poss_rows[row] &= mov_bin_inv;
-                self.poss_cols[col] &= mov_bin_inv;
-                self.poss_quads[quad] &= mov_bin_inv;
-                values[(row, col)] = mov_zero_based as u8 + 1;
+        match self.get_possible_moves(row, col) {
+            None => self.solve_(cursor + 1),
+            Some(moves) => {
+                for mov_zero_based in moves {
+                    self.set_value_(row, col, quad, mov_zero_based);
+        
+                    if self.solve_(cursor + 1) {
+                        return true;
+                    }
 
-                let option = self.find_solution_(values, cursor + 1);
-                if option.is_some() {
-                    return option;     
+                    self.reset_value(row, col);
                 }
-
-                values[(row, col)] = 0;
-                self.poss_rows[row] |= mov_bin;
-                self.poss_cols[col] |= mov_bin;
-                self.poss_quads[quad] |= mov_bin;
+                return false;
             }
         }
-
-        return Option::None;
     }
 
-    pub fn solve(&mut self) {
-        let solution = self.find_solution_(&mut self.values.clone(), 0)
-                .expect("No solution found");
-        self.values = solution;
-        self.solved = true;
+    pub fn solve(&mut self) {        
+        self.solved = self.solve_(0);
     }
 
     pub fn generate(&mut self) {
-        let mut values_random_mask: [usize; 9] = core::array::from_fn(|i| i + 1);
+        let mut values_random_mask: [u8; 9] = core::array::from_fn(|i| (i + 1) as u8);
         values_random_mask.shuffle(&mut thread_rng());
 
         let mut cursor_random_mask: [usize; 81] = [0; 81];
@@ -194,204 +214,218 @@ impl Playfield {
         }
         cursor_random_mask.shuffle(&mut thread_rng());
 
-        let mut solution = self.find_solution_(&mut self.values.clone(), 0)
-                .expect("No solution found");
-        
-        let generated = self.generate_(&mut solution, cursor_random_mask, 0, 0)
-                .expect("No solution generated");
+        if !self.solve_(0) {
+            panic!("No solution found");
+        }
 
-        self.values = generated;
+        if !self.generate_(cursor_random_mask, 0, 0) {
+            panic!("No solution generated");
+        }
+
+        // for i in 0..9 {
+        //     for j in 0..9 {
+        //         let val = self.values[(i,j)];
+        //         if val == 0 {
+        //             continue;
+        //         }
+
+        //         self.values[(i,j)] = values_random_mask[(val - 1) as usize];
+        //     }
+        // }
     }
 
-    fn multiple_solutions_(&mut self, values: &mut Array2D<u8>, cursor:usize) -> u8 {
+    fn multiple_solutions_(&mut self, cursor:usize) -> u8 {
         if cursor >= 81 {
+            // for i in 0..9 {
+            //     for j in 0..9 {
+            //         let val = self.values[(i,j)];
+            //         if val == 0 {
+            //             print!("  ");
+            //         } else {
+            //             print!(" {val}");
+            //         }
+            //     }
+            //     println!();
+            // }
             return 1;
         }
         let field = FIELDS[cursor];
         let row = field.0 as usize;
         let col = field.1 as usize;
+        let quad = QUADS[row][col] as usize;
 
-        let field_val = values[(row,col)];
+        match self.get_possible_moves(row, col) {
+            None => self.multiple_solutions_(cursor + 1),
+            Some(moves) => {
+                let mut sum = 0;
+                for mov_zero_based in moves {
+                    // println!("row: {row}, col: {col}, val: {mov_zero_based}");
+                    self.set_value_(row, col, quad, mov_zero_based);
+        
+                    sum += self.multiple_solutions_(cursor + 1);
 
-        let mut solution_count:u8 = 0;
-        if field_val > 0 {
-            solution_count += self.multiple_solutions_(values, cursor + 1);
-        } else {
-            let quad = QUADS[row][col] as usize;
-            let poss: u16 = self.poss_rows[row] & self.poss_cols[col] & self.poss_quads[quad];
-            for mov_zero_based in poss.view_bits::<Lsb0>()[0..9].iter_ones() {
-                let mov_bin = VALUES_BIN[mov_zero_based];
-                let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
-    
-                self.poss_rows[row] &= mov_bin_inv;
-                self.poss_cols[col] &= mov_bin_inv;
-                self.poss_quads[quad] &= mov_bin_inv;
-                values[(row, col)] = mov_zero_based as u8 + 1;
-    
-                solution_count += self.multiple_solutions_(values, cursor + 1);
-
-                values[(row, col)] = 0;
-                self.poss_rows[row] |= mov_bin;
-                self.poss_cols[col] |= mov_bin;
-                self.poss_quads[quad] |= mov_bin;
-
-                if solution_count > 1 {
-                    return 2;
+                    self.reset_value(row, col);
+                    if sum > 1 {
+                        return 2;
+                    }
                 }
+                return sum;
             }
         }
-        
-        return solution_count;
     }
 
     pub fn count_solutions(&mut self) -> u8 {
-        self.multiple_solutions_(&mut self.values.clone(), 0)
+        self.multiple_solutions_(0)
     }
-
-    // fn count_solutions_(&mut self, values: &mut Array2D<u8>, cursor:usize) -> u32 {
-    //     if cursor >= 81 {
-    //         // println!("solution found");
-    //         return 1;
-    //     }
-    //     let field = FIELDS[cursor];
-    //     let row = field.0 as usize;
-    //     let col = field.1 as usize;
-
-    //     let field_val = values[(row,col)];
-
-    //     let mut solution_count = 0;
-    //     if field_val > 0 {
-    //         solution_count += self.count_solutions_(values, cursor + 1);
-    //     } else {
-    //         let quad = QUADS[row][col] as usize;
-    //         let poss: u16 = self.poss_rows[row] & self.poss_cols[col] & self.poss_quads[quad];
-    //         for mov_zero_based in poss.view_bits::<Lsb0>()[0..9].iter_ones() {
-    //             let mov_bin = VALUES_BIN[mov_zero_based];
-    //             let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
-    
-    //             self.poss_rows[row] &= mov_bin_inv;
-    //             self.poss_cols[col] &= mov_bin_inv;
-    //             self.poss_quads[quad] &= mov_bin_inv;
-    //             values[(row, col)] = mov_zero_based as u8 + 1;
-    
-    //             solution_count += self.count_solutions_(values, cursor + 1);
-    
-    //             values[(row, col)] = 0;
-    //             self.poss_rows[row] |= mov_bin;
-    //             self.poss_cols[col] |= mov_bin;
-    //             self.poss_quads[quad] |= mov_bin;
-    //         }
-    //     }
-    //     return solution_count;
-    // }
-
-    // fn count_solutions(&mut self) -> u32 {
-    //     self.count_solutions_(&mut self.values.clone(), 0)
-    // }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn test_solution_counter_empty() {
-//         let mut playfield = Playfield::new();
-//         assert!(playfield.multiple_solutions());
-//     }
+    #[test]
+    fn test_solution_counter_empty() {
+        let mut playfield = Playfield::new();
+        assert!(playfield.count_solutions() > 1);
+    }
 
-//     #[test]
-//     fn test_solution_counter_full() {
-//         let mut playfield = Playfield::new();
-//         playfield.solve();
-//         assert!(!playfield.multiple_solutions());
-//         // assert_eq!(1, playfield.count_solutions());
-//     }
+    #[test]
+    fn test_solution_counter_full() {
+        let mut playfield = Playfield::new();
+        playfield.solve();
+        assert!(playfield.count_solutions() == 1);
+        // assert_eq!(1, playfield.count_solutions());
+    }
 
-//     #[test]
-//     fn test_solution_counter_partial() {
-//         let mut playfield = Playfield::new();
-//         playfield.solve();
+    #[test]
+    fn test_solution_counter_partial() {
+        let mut playfield = Playfield::new();
+        playfield.solve();
 
-//         let mut cursor_random_mask: [usize; 81] = [0; 81];
-//         for i in 0..81 {
-//             cursor_random_mask[i] = i;
-//         }
-//         cursor_random_mask.shuffle(&mut thread_rng());
+        let mut cursor_random_mask: [usize; 81] = [0; 81];
+        for i in 0..81 {
+            cursor_random_mask[i] = i;
+        }
+        cursor_random_mask.shuffle(&mut thread_rng());
 
-//         for i in 0..20 {
-//             let field = FIELDS[cursor_random_mask[i]];
-//             playfield.set_value(field.0 as usize, field.1 as usize, 0);
-//         }
+        for i in 0..20 {
+            let field = FIELDS[cursor_random_mask[i]];
+            playfield.set_value(field.0 as usize, field.1 as usize, 0);
+        }
 
-//         // assert_eq!(1, playfield.count_solutions());
-//         assert!(!playfield.multiple_solutions());
-//     }
+        let values_before = playfield.values.clone();
+        // assert_eq!(1, playfield.count_solutions());
+        assert!(playfield.count_solutions() == 1);
 
-//     #[test]
-//     fn test_solution_counter_partial_2() {
-//         let mut playfield = Playfield::new();
-//         playfield.set_value(0, 6, 7);
-//         playfield.set_value(0, 8, 9);
-//         playfield.set_value(1, 6, 1);
-//         playfield.set_value(2, 3, 1);
-//         playfield.set_value(2, 4, 2);
-//         playfield.set_value(3, 4, 6);
-//         playfield.set_value(4, 2, 5);
-//         playfield.set_value(4, 3, 8);
-//         playfield.set_value(4, 6, 2);
-//         playfield.set_value(4, 8, 4);
-//         playfield.set_value(5, 1, 9);
-//         playfield.set_value(5, 2, 7);
-//         playfield.set_value(5, 3, 2);
-//         playfield.set_value(5, 7, 6);
-//         playfield.set_value(5, 8, 5);
-//         playfield.set_value(6, 0, 5);
-//         playfield.set_value(6, 2, 1);
-//         playfield.set_value(6, 5, 2);
+        assert_eq!(values_before, playfield.values);
+    }
 
-//         assert!(playfield.multiple_solutions());
-//     }
+    #[test]
+    fn test_solution_counter_partial_2() {
+        let mut playfield = Playfield::new();
+        playfield.set_value(0, 6, 7);
+        playfield.set_value(0, 8, 9);
+        playfield.set_value(1, 6, 1);
+        playfield.set_value(2, 3, 1);
+        playfield.set_value(2, 4, 2);
+        playfield.set_value(3, 4, 6);
+        playfield.set_value(4, 2, 5);
+        playfield.set_value(4, 3, 8);
+        playfield.set_value(4, 6, 2);
+        playfield.set_value(4, 8, 4);
+        playfield.set_value(5, 1, 9);
+        playfield.set_value(5, 2, 7);
+        playfield.set_value(5, 3, 2);
+        playfield.set_value(5, 7, 6);
+        playfield.set_value(5, 8, 5);
+        playfield.set_value(6, 0, 5);
+        playfield.set_value(6, 2, 1);
+        playfield.set_value(6, 5, 2);
 
-//     #[test]
-//     fn test_solution_counter_partial_3() {
-//         let mut playfield = Playfield::new();
-//         playfield.set_value(0, 2, 3);
-//         playfield.set_value(0, 4, 5);
-//         playfield.set_value(0, 5, 6);
-//         playfield.set_value(0,7,8);
-//         playfield.set_value(0, 8,9);
-//         playfield.set_value(1,0,4);
-//         playfield.set_value(1,3,7);
-//         playfield.set_value(1,4,8);
-//         playfield.set_value(1,5,9);
-//         playfield.set_value(1,6,1);
-//         playfield.set_value(1,7,2);
-//         playfield.set_value(2,2,9);
-//         playfield.set_value(2,6,4);
-//         playfield.set_value(2,8,6);
-//         playfield.set_value(3,7,9);
-//         playfield.set_value(4,0,3);
-//         playfield.set_value(4,1,6);
-//         playfield.set_value(4,5,7);
-//         playfield.set_value(4,6,2);
-//         playfield.set_value(5,2,7);
-//         playfield.set_value(5,3,2);
-//         playfield.set_value(5,4,1);
-//         playfield.set_value(5,6,3);
-//         playfield.set_value(5,7,6);
-//         playfield.set_value(6,1,3);
-//         playfield.set_value(6,4,4);
-//         playfield.set_value(6,5,2);
-//         playfield.set_value(6,8,8);
-//         playfield.set_value(7,8,1);
-//         playfield.set_value(8,8,2);
-        
-//         assert!(!playfield.multiple_solutions());
-//     }
-// }
+        assert!(playfield.count_solutions() > 1);
+    }
+
+    #[test]
+    fn test_set_value() {
+        let playfield = &mut Playfield::new();
+
+        playfield.set_value(0, 0, 1);
+        check(playfield, 0, 0, 1);
+
+        playfield.set_value(0, 0, 2);
+        check(playfield, 0, 0, 2);
+
+        playfield.set_value(0, 0, 0);
+        check(playfield, 0, 0, 0)
+    }
+
+    #[test]
+    fn test_solution_counter_partial_3() {
+        let mut playfield = Playfield::new();
+        playfield.solve();
+        playfield.reset_value(0, 8);
+        playfield.reset_value(1, 5);
+        playfield.reset_value(2, 2);
+        playfield.reset_value(2, 2);
+        playfield.reset_value(3, 7);
+        playfield.reset_value(4, 4);
+        playfield.reset_value(5, 1);
+        playfield.reset_value(6, 6);
+        playfield.reset_value(7, 3);
+        playfield.reset_value(8, 0);
+
+        playfield.set_value(7, 1, 5);
+        playfield.set_value(7, 1, 6);
+        playfield.set_value(7, 1, 7);
+        playfield.set_value(7, 1, 8);
+        playfield.set_value(7, 1, 9);
+        playfield.set_value(7, 1, 0);
+
+        assert_eq!(playfield.get_possible_moves(7, 1).unwrap(), vec![3,8]);
+
+        assert_eq!(playfield.count_solutions(), 1);
+    }
+
+    fn check(playfield:&mut Playfield, row:usize, col:usize, val:usize) {
+        let mut v:Vec<usize> = vec![];
+        let val_zero_based = val as i32 - 1;
+
+        for i in 0..9 {
+            if i == val_zero_based {
+                continue;
+            }
+            v.push(i as usize);
+        }
+
+        for i in 0..9 {
+            if row != i {
+                assert_eq!(playfield.get_possible_moves(row, i).unwrap(), v.clone());
+            }
+
+            if col != i {
+                assert_eq!(playfield.get_possible_moves(i, col).unwrap(), v.clone());
+            }
+
+            if !(row == i && col == i) {
+                let r = i/3;
+                let c = i%3;
+
+                assert_eq!(playfield.get_possible_moves(r, c).unwrap(), v.clone());
+            }
+        }
+    }
+}
 
 #[derive(Resource)]
 pub struct Status {
     pub text: String,
+}
+
+fn print_recursion_step(cursor:usize, sign:&str) {
+    let mut i = 0;
+    while i < cursor {
+        print!("{sign}");
+        i += 1;
+    }
+    println!("{sign}");
 }

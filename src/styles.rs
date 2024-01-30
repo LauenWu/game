@@ -8,7 +8,7 @@ pub const PRESSED_COLOR:Color = Color::rgb(0.5, 0.9, 0.5);
 pub const TEXT_COLOR:Color = Color::rgb(0.25, 0.25, 0.25);
 pub const FIXED_TEXT_COLOR:Color = Color::BLACK;
 
-pub const BACKGROUND_COLOR:Color = Color::rgb(0.25, 0.25, 0.25);
+pub const BACKGROUND_COLOR:Color = Color::rgb(192./255., 2./255., 244./255.);
 pub const MENU_BUTTON_COLOR:Color = Color::WHITE;
 pub const MENU_BUTTON_TEXT_COLOR:Color = Color::rgb(0.2, 0.2, 0.2);
 
