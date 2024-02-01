@@ -20,13 +20,19 @@ pub struct Value {
 }
 
 #[derive(Component)]
-pub struct SolveButton;
+pub struct Solve;
 
 #[derive(Component)]
-pub struct GenerateButton;
+pub struct ButtonComponent;
 
 #[derive(Component)]
-pub struct CountButton;
+pub struct Generate;
 
 #[derive(Component)]
-pub struct StatusComponent;
+pub struct Check;
+
+#[derive(Component)]
+pub struct StatusText;
+
+#[derive(Component)]
+pub struct CheckText;

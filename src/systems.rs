@@ -33,15 +33,22 @@ pub fn setup(
         }
     ).with_children(|builder| {
         // Header
-        builder.spawn(TextBundle::from_section(
-            "",
-            get_text_style(&asset_server)
-        ).with_style(
-            Style {
-                grid_column: GridPlacement::span(2),
-                ..default()
-            }
-        ).with_text_alignment(TextAlignment::Left));
+        builder.spawn((
+            TextBundle::from_section(
+                "",
+                TextStyle {
+                    font: asset_server.load("fonts/FiraSans-Bold.ttf").clone(),
+                    font_size: 24.0,
+                    color: MENU_BUTTON_COLOR,
+                }
+            ).with_style(
+                Style {
+                    grid_column: GridPlacement::span(2),
+                    ..default()
+                }
+            ).with_text_alignment(TextAlignment::Left),
+            StatusText
+        ));
 
         // Main content
         builder.spawn((
@@ -108,37 +115,24 @@ pub fn setup(
                                         },
                                     ))
                                     .with_children(|builder| {
-                                        let button_bundle = ButtonBundle {
-                                            style: Style {
-                                                aspect_ratio: Some(1.0),
-                                                width: Val::Px(FIELD_SIZE),
-                                                justify_content: JustifyContent::Center,
-                                                align_items: AlignItems::Center,
+                                        builder.spawn((
+                                            ButtonBundle {
+                                                style: Style {
+                                                    aspect_ratio: Some(1.0),
+                                                    width: Val::Px(FIELD_SIZE),
+                                                    justify_content: JustifyContent::Center,
+                                                    align_items: AlignItems::Center,
+                                                    ..default()
+                                                },
+                                                background_color: BackgroundColor(FIELD_COLOR),
                                                 ..default()
                                             },
-                                            background_color: BackgroundColor(FIELD_COLOR),
-                                            ..default()
-                                        };
-                                        let mut parent;
-                                        if playfield.values[(row, col)] > 0 {
-                                            parent = builder.spawn((
-                                                button_bundle,
-                                                FixedField {
-                                                    row: row,
-                                                    col: col,
-                                                }
-                                            ));
-                                        } else {
-                                            parent = builder.spawn((
-                                                button_bundle,
-                                                Field {
-                                                    row: row,
-                                                    col: col,
-                                                    val: Option::None,
-                                                }
-                                            ));
-                                        };
-                                        parent.with_children(|builder| {
+                                            Field {
+                                                row: row,
+                                                col: col,
+                                                val: Option::None,
+                                            }
+                                        )).with_children(|builder| {
                                             builder.spawn((
                                                 TextBundle {
                                                     text: Text {
@@ -193,14 +187,15 @@ pub fn setup(
                     background_color: BackgroundColor(MENU_BUTTON_COLOR),
                     ..default()
                 },
-                SolveButton
+                Solve,
+                ButtonComponent
             ))
             .with_children(|builder| {
                 builder.spawn(TextBundle {
                     text: Text {
                         sections: vec![
                             TextSection::new(
-                                "solve",
+                                "Rätsel lösen",
                                 get_text_style(&asset_server).clone()
                             )
                         ],
@@ -224,14 +219,15 @@ pub fn setup(
                     background_color: BackgroundColor(MENU_BUTTON_COLOR),
                     ..default()
                 },
-                GenerateButton
+                Generate,
+                ButtonComponent
             ))
             .with_children(|builder| {
                 builder.spawn(TextBundle {
                     text: Text {
                         sections: vec![
                             TextSection::new(
-                                "generate",
+                                "neues Spiel",
                                 get_text_style(&asset_server).clone()
                             )
                         ],
@@ -255,123 +251,133 @@ pub fn setup(
                     background_color: BackgroundColor(MENU_BUTTON_COLOR),
                     ..default()
                 },
-                CountButton
+                Check,
+                ButtonComponent
             ))
             .with_children(|builder| {
-                builder.spawn(TextBundle {
-                    text: Text {
-                        sections: vec![
-                            TextSection::new(
-                                "count",
-                                get_text_style(&asset_server).clone()
-                            )
-                        ],
-                        alignment: TextAlignment::Center,
+                builder.spawn((
+                    TextBundle {
+                        text: Text {
+                            sections: vec![
+                                TextSection::new(
+                                    "Fehler anzeigen",
+                                    get_text_style(&asset_server).clone()
+                                )
+                            ],
+                            alignment: TextAlignment::Center,
+                            ..default()
+                        },
                         ..default()
                     },
-                    ..default()
-                });
+                    CheckText
+                ));
             });
-
-            builder.spawn((
-                TextBundle {
-                    text: Text {
-                        sections: vec![
-                            TextSection::new(
-                                format!("y"),
-                                TextStyle {
-                                    font: asset_server.load("fonts/FiraSans-Bold.ttf").clone(),
-                                    font_size: 24.0,
-                                    color: FIELD_COLOR,
-                                }
-                            )
-                        ],
-                        alignment: TextAlignment::Center,
-                        ..default()
-                    },
-                    ..default()
-                },
-                StatusComponent
-            ));
         });
     });
 }
 
-pub fn field_buttons(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor, &Field), (Changed<Interaction>, With<Field>)>,
+pub fn field_button_interaction(
+    mut buttons: Query<(&Interaction, &Field), (Changed<Interaction>, With<Field>)>,
     mut playfield: ResMut<Playfield>
 ) {
-    for (interaction, mut button_color, field) in &mut buttons {
-        *button_color = match interaction {
+    for (interaction, field) in &mut buttons {
+        match interaction {
             Interaction::Pressed => {
+                if playfield.fixed[(field.row, field.col)] {
+                    return;
+                }
                 let v = (playfield.values[(field.row, field.col)] + 1) % 10;
                 playfield.set_value(field.row, field.col, 0);
                 if v != 0 {
                     playfield.set_value(field.row, field.col, v);
                 }
-                PRESSED_COLOR
             },
-            Interaction::Hovered => HOVER_COLOR,
-            Interaction::None => FIELD_COLOR,
+            Interaction::Hovered => {},
+            Interaction::None => {},
+        };
+    }
+}
+
+pub fn field_color(
+    mut fields: Query<(&Interaction, &mut BackgroundColor, &Field), With<Field>>,
+    playfield: Res<Playfield>
+) {
+    for (interaction, mut button_color, field) in &mut fields {
+        *button_color = match interaction {
+            Interaction::Pressed => PRESSED_COLOR,
+            Interaction::Hovered => {
+                if playfield.fixed[(field.row, field.col)] {
+                    FIXED_FIELD_COLOR
+                } else {
+                    HOVER_COLOR
+                }
+            },
+            Interaction::None => {
+                if playfield.fixed[(field.row, field.col)] {
+                    FIXED_FIELD_COLOR
+                } else {
+                    let error = playfield.errors[(field.row, field.col)];
+                    if error && playfield.show_errors {
+                        ERROR_COLOR
+                    } else {
+                        FIELD_COLOR
+                    }
+                }
+            },
         }.into();
     }
 }
 
+pub fn button_interaction(
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<ButtonComponent>)>
+) {
+    for (interaction, mut background_color) in &mut buttons {
+        *background_color = match *interaction {
+            Interaction::Pressed => PRESSED_COLOR.into(),
+            Interaction::Hovered => HOVER_COLOR.into(),
+            Interaction::None => MENU_BUTTON_COLOR.into(),
+        }
+    }
+}
+
 pub fn generate_button(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<GenerateButton>)>,
+    mut buttons: Query<&Interaction, (Changed<Interaction>, With<Generate>)>,
     mut playfield: ResMut<Playfield>
 ) {
-    if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
+    if let Ok(interaction) = buttons.get_single_mut() {
         match *interaction {
-            Interaction::Pressed => {
-                playfield.generate();
-            }
-            Interaction::Hovered => {
-               *backgroud_color = HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *backgroud_color = MENU_BUTTON_COLOR.into();
-             }
+            Interaction::Pressed => playfield.generate(),
+            Interaction::Hovered => {}
+            Interaction::None => {}
         }
     }
 }
 
 pub fn solve_button(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<SolveButton>)>,
+    mut buttons: Query<&Interaction, (Changed<Interaction>, With<Solve>)>,
     mut playfield: ResMut<Playfield>
 ) {
-    if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
+    if let Ok(interaction) = buttons.get_single_mut() {
         match *interaction {
-            Interaction::Pressed => {
-                playfield.solve();
-            }
-            Interaction::Hovered => {
-               *backgroud_color = HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *backgroud_color = MENU_BUTTON_COLOR.into();
-             }
+            Interaction::Pressed => playfield.solve(),
+            Interaction::Hovered => {}
+            Interaction::None => {}
         }
     }
 }
 
-pub fn count_button(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<CountButton>)>,
-    mut playfield: ResMut<Playfield>, mut status: ResMut<Status>
+pub fn check_button(
+    mut buttons: Query<&Interaction, (Changed<Interaction>, With<Check>)>,
+    mut playfield: ResMut<Playfield> //, mut status: ResMut<Status>
 ) {
-    if let Ok((interaction, mut backgroud_color)) = buttons.get_single_mut() {
+    if let Ok(interaction) = buttons.get_single_mut() {
         match *interaction {
             Interaction::Pressed => {
-                println!("count");
-                let count = playfield.count_solutions();
-                status.text = format!("{count}");
+                playfield.show_errors = !playfield.show_errors;
+                //status.text = format!("{count}");
             }
-            Interaction::Hovered => {
-               *backgroud_color = HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *backgroud_color = MENU_BUTTON_COLOR.into();
-             }
+            Interaction::Hovered => {}
+            Interaction::None => {}
         }
     }
 }
@@ -391,18 +397,24 @@ pub fn read_values(
     }
 }
 
-pub fn read_status(
-    mut buttons: Query<(&mut Text, With<StatusComponent>)>,
-    status: Res<Status>
+pub fn read_check_button_status(
+    mut buttons: Query<&mut Text, With<CheckText>>,
+    playfield: Res<Playfield>
 ) {
-    for (mut text, _ ) in &mut buttons {
-        text.sections[0].value = status.text.clone();
+    for mut text  in &mut buttons {
+        if playfield.show_errors {
+            text.sections[0].value = format!("Fehler verbergen");
+        } else {
+            text.sections[0].value = format!("Fehler anzeigen");
+        }
     }
 }
 
-// enum SolvableState {
-//     Specifying, // when conditions for generation are not yet defined
-//     Generating, // when conditions for generation are defined, but conditions for solving not
-//     Solving, // when conditions for solving are defined 
-//     Solved, // when all fields are set and all conditions are met    
-// }
+pub fn read_status(
+    mut buttons: Query<(&mut Text, With<StatusText>)>,
+    playfield: Res<Playfield>
+) {
+    for (mut text, _ ) in &mut buttons {
+        text.sections[0].value = playfield.status_text.clone();
+    }
+}

@@ -47,11 +47,14 @@ const LEVEL:u8 = 55;
 #[derive(Resource)]
 pub struct Playfield {
     pub values: Array2D<u8>,
-    errors: Array2D<bool>,
+    pub errors: Array2D<bool>,
+    pub fixed: Array2D<bool>,
     poss_rows: [u16; 9],
     poss_cols: [u16; 9],
     poss_quads: [u16; 9],
     solved: bool,
+    pub show_errors: bool,
+    pub status_text: String,
 }
 
 impl Playfield {
@@ -59,10 +62,13 @@ impl Playfield {
         Playfield {
             values: Array2D::filled_with(0, ROW_COUNT as usize, COL_COUNT as usize),
             errors: Array2D::filled_with(false, ROW_COUNT as usize, COL_COUNT as usize),
+            fixed: Array2D::filled_with(false, ROW_COUNT as usize, COL_COUNT as usize),
             poss_rows: [0b1111111111111111u16; 9],
             poss_cols: [0b1111111111111111u16; 9],
             poss_quads: [0b1111111111111111u16; 9],
             solved: false,
+            show_errors: false,
+            status_text: format!(""),
         }
     }
 
@@ -78,6 +84,10 @@ impl Playfield {
     }
 
     pub fn set_value(&mut self, row:usize, col:usize, mov:u8) {
+        if self.fixed[(row, col)] {
+            return;
+        }
+
         if mov == 0 {
             self.reset_value(row, col);
             return;
@@ -104,11 +114,9 @@ impl Playfield {
                 self.values[(row, col)] = mov;
             }
         }
-
-        
     }
 
-    fn set_value_(&mut self, row:usize, col:usize, quad:usize, mov_zero_based:usize) {        
+    fn set_value_(&mut self, row:usize, col:usize, quad:usize, mov_zero_based:usize) {
         let mov_bin_inv = VALUES_BIN_INV[mov_zero_based];
 
         self.poss_rows[row] &= mov_bin_inv;
@@ -118,6 +126,10 @@ impl Playfield {
     }
 
     pub fn reset_value(&mut self, row:usize, col:usize) {
+        if self.fixed[(row, col)] {
+            return;
+        }
+
         let current_val = self.values[(row, col)];
 
         if current_val == 0 {
@@ -145,13 +157,13 @@ impl Playfield {
 
     fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
         if removed_count >= LEVEL {
-            if self.count_solutions() == 1 {
+            if self.multiple_solutions_(0) == 1 {
                 return true;
             }
             return false;
         }
 
-        if removed_count > 30 && self.count_solutions() > 1 {
+        if removed_count > 35 && self.multiple_solutions_(0) > 1 {
             return false;
         }
 
@@ -169,14 +181,10 @@ impl Playfield {
 
         self.reset_value_(row, col, quad, mov_zero_based);
 
-        //print_recursion_step(cursor, "-");
-
-        // println!("{}{} delete field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
         if self.generate_(fields_queue, cursor + 1, removed_count + 1) {
             return true;
         }
 
-        // println!("{}{} reset field: {}", removed_count, "-".repeat(removed_count as usize), cursor);
         self.set_value_(row, col, quad, mov_zero_based);
         return self.generate_(fields_queue, cursor + 1, removed_count);
     }
@@ -207,11 +215,66 @@ impl Playfield {
         }
     }
 
-    pub fn solve(&mut self) {        
+    fn solve_random_(&mut self, cursor:usize) -> bool {
+        if cursor >= 81 {
+            return true;
+        }
+        let field = FIELDS[cursor];
+        let row = field.0 as usize;
+        let col = field.1 as usize;
+        let quad = QUADS[row][col] as usize;
+
+        match self.get_possible_moves(row, col) {
+            None => self.solve_(cursor + 1),
+            Some(mut moves) => {
+                moves.shuffle(&mut thread_rng());
+                for mov_zero_based in moves {
+                    self.set_value_(row, col, quad, mov_zero_based);
+        
+                    if self.solve_(cursor + 1) {
+                        return true;
+                    }
+
+                    self.reset_value(row, col);
+                }
+                return false;
+            }
+        }
+    }
+
+    pub fn solve(&mut self) {   
+        if self.check_error() {
+            return;
+        };     
         self.solved = self.solve_(0);
     }
 
+    fn has_error(&self) -> bool {
+        for i in 0..9 {
+            for j in 0..9 {
+                if self.errors[(i,j)] {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    
+    fn check_error(&mut self) -> bool {
+        if self.has_error() {
+            self.status_text = format!("Fehler gefunden!");
+            true
+        } else {
+            self.status_text = format!("");
+            false
+        }
+    }
+
     pub fn generate(&mut self) {
+        if self.check_error() {
+            return;
+        };
+
         let mut values_random_mask: [u8; 9] = core::array::from_fn(|i| (i + 1) as u8);
         values_random_mask.shuffle(&mut thread_rng());
 
@@ -221,39 +284,36 @@ impl Playfield {
         }
         cursor_random_mask.shuffle(&mut thread_rng());
 
-        if !self.solve_(0) {
+        if !self.solve_random_(0) {
             panic!("No solution found");
         }
-
+        
         if !self.generate_(cursor_random_mask, 0, 0) {
             panic!("No solution generated");
         }
 
-        // for i in 0..9 {
-        //     for j in 0..9 {
-        //         let val = self.values[(i,j)];
-        //         if val == 0 {
-        //             continue;
-        //         }
+        let values = self.values.clone();
+        for i in 0..9 {
+            for j in 0..9 {
+                self.reset_value(i,j);
+            }
+        }
 
-        //         self.values[(i,j)] = values_random_mask[(val - 1) as usize];
-        //     }
-        // }
+        for i in 0..9 {
+            for j in 0..9 {
+                let val = values[(i,j)];
+                if val == 0 {
+                    self.fixed[(i, j)] = false;
+                    continue;
+                }
+                self.set_value(i,j, values_random_mask[(val - 1) as usize]);
+                self.fixed[(i, j)] = true;
+            }
+        }
     }
 
     fn multiple_solutions_(&mut self, cursor:usize) -> u8 {
         if cursor >= 81 {
-            // for i in 0..9 {
-            //     for j in 0..9 {
-            //         let val = self.values[(i,j)];
-            //         if val == 0 {
-            //             print!("  ");
-            //         } else {
-            //             print!(" {val}");
-            //         }
-            //     }
-            //     println!();
-            // }
             return 1;
         }
         let field = FIELDS[cursor];
@@ -280,10 +340,6 @@ impl Playfield {
             }
         }
     }
-
-    pub fn count_solutions(&mut self) -> u8 {
-        self.multiple_solutions_(0)
-    }
 }
 
 #[cfg(test)]
@@ -293,14 +349,14 @@ mod tests {
     #[test]
     fn test_solution_counter_empty() {
         let mut playfield = Playfield::new();
-        assert!(playfield.count_solutions() > 1);
+        assert!(playfield.multiple_solutions_(0) > 1);
     }
 
     #[test]
     fn test_solution_counter_full() {
         let mut playfield = Playfield::new();
         playfield.solve();
-        assert!(playfield.count_solutions() == 1);
+        assert!(playfield.multiple_solutions_(0) == 1);
         // assert_eq!(1, playfield.count_solutions());
     }
 
@@ -322,7 +378,7 @@ mod tests {
 
         let values_before = playfield.values.clone();
         // assert_eq!(1, playfield.count_solutions());
-        assert!(playfield.count_solutions() == 1);
+        assert!(playfield.multiple_solutions_(0) == 1);
 
         assert_eq!(values_before, playfield.values);
     }
@@ -349,7 +405,7 @@ mod tests {
         playfield.set_value(6, 2, 1);
         playfield.set_value(6, 5, 2);
 
-        assert!(playfield.count_solutions() > 1);
+        assert!(playfield.multiple_solutions_(0) > 1);
     }
 
     #[test]
@@ -390,7 +446,7 @@ mod tests {
 
         assert_eq!(playfield.get_possible_moves(7, 1).unwrap(), vec![3,8]);
 
-        assert_eq!(playfield.count_solutions(), 1);
+        assert_eq!(playfield.multiple_solutions_(0), 1);
     }
 
     fn check(playfield:&mut Playfield, row:usize, col:usize, val:usize) {
@@ -421,11 +477,6 @@ mod tests {
             }
         }
     }
-}
-
-#[derive(Resource)]
-pub struct Status {
-    pub text: String,
 }
 
 fn print_recursion_step(cursor:usize, sign:&str) {
