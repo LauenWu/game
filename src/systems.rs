@@ -1,10 +1,44 @@
 use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 use crate::components::*;
 use crate::resources::*;
 use crate::styles::*;
 
 pub const FIELD_SIZE:f32 = 50.0;
+
+pub fn sidebar(
+    mut contexts: EguiContexts,
+    mut playfield: ResMut<Playfield>,
+) {
+    let ctx = contexts.ctx_mut();
+    egui::SidePanel::right("side_panel")
+        .default_width(200.0)
+        .show(ctx, |ui| {
+            ui.heading("Settings");
+            
+            ui.add(egui::Slider::new(&mut playfield.difficulty, 20.0..=60.0.into())
+                .fixed_decimals(0)
+                .text("Schwierigkeit"));
+            
+            if ui.button("Neu").clicked() {
+                playfield.generate();
+            }
+
+            if ui.button("Lösen").clicked() {
+                playfield.solve();
+            }
+
+            let check_button_text = match playfield.show_errors {
+                true => "Fehler verbergen",
+                false => "Fehler anzeigen",
+            };
+
+            if ui.button(check_button_text).clicked() {
+                playfield.show_errors = !playfield.show_errors;
+            }
+        });
+}
 
 pub fn setup(
     mut commands: Commands,
@@ -161,118 +195,6 @@ pub fn setup(
                 }
             });
         });
-
-        // right container
-        builder.spawn(NodeBundle {
-            style: Style {
-                flex_direction: FlexDirection::Column,
-                //justify_content: JustifyContent::Center,
-                align_items: AlignItems::Start,
-                height: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(4.0)),
-                ..default()
-            },
-            ..default()
-        }).with_children(|builder| {
-            builder.spawn((
-                ButtonBundle {
-                    style: Style {
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        margin: UiRect::all(Val::Px(4.0)),
-                        height: Val::Px(35.0),
-                        ..default()
-                    },
-                    background_color: BackgroundColor(MENU_BUTTON_COLOR),
-                    ..default()
-                },
-                Solve,
-                ButtonComponent
-            ))
-            .with_children(|builder| {
-                builder.spawn(TextBundle {
-                    text: Text {
-                        sections: vec![
-                            TextSection::new(
-                                "Rätsel lösen",
-                                get_text_style(&asset_server).clone()
-                            )
-                        ],
-                        alignment: TextAlignment::Center,
-                        ..default()
-                    },
-                    ..default()
-                });
-            });
-
-            builder.spawn((
-                ButtonBundle {
-                    style: Style {
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        margin: UiRect::all(Val::Px(4.0)),
-                        height: Val::Px(35.0),
-                        ..default()
-                    },
-                    background_color: BackgroundColor(MENU_BUTTON_COLOR),
-                    ..default()
-                },
-                Generate,
-                ButtonComponent
-            ))
-            .with_children(|builder| {
-                builder.spawn(TextBundle {
-                    text: Text {
-                        sections: vec![
-                            TextSection::new(
-                                "neues Spiel",
-                                get_text_style(&asset_server).clone()
-                            )
-                        ],
-                        alignment: TextAlignment::Center,
-                        ..default()
-                    },
-                    ..default()
-                });
-            });
-
-            builder.spawn((
-                ButtonBundle {
-                    style: Style {
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        margin: UiRect::all(Val::Px(4.0)),
-                        height: Val::Px(35.0),
-                        ..default()
-                    },
-                    background_color: BackgroundColor(MENU_BUTTON_COLOR),
-                    ..default()
-                },
-                Check,
-                ButtonComponent
-            ))
-            .with_children(|builder| {
-                builder.spawn((
-                    TextBundle {
-                        text: Text {
-                            sections: vec![
-                                TextSection::new(
-                                    "Fehler anzeigen",
-                                    get_text_style(&asset_server).clone()
-                                )
-                            ],
-                            alignment: TextAlignment::Center,
-                            ..default()
-                        },
-                        ..default()
-                    },
-                    CheckText
-                ));
-            });
-        });
     });
 }
 
@@ -316,7 +238,7 @@ pub fn field_color(
                 if playfield.fixed[(field.row, field.col)] {
                     FIXED_FIELD_COLOR
                 } else {
-                    let error = playfield.errors[(field.row, field.col)];
+                    let error = playfield.is_error(field.row, field.col);
                     if error && playfield.show_errors {
                         ERROR_COLOR
                     } else {
@@ -325,44 +247,6 @@ pub fn field_color(
                 }
             },
         }.into();
-    }
-}
-
-pub fn button_interaction(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<ButtonComponent>)>
-) {
-    for (interaction, mut background_color) in &mut buttons {
-        *background_color = match *interaction {
-            Interaction::Pressed => PRESSED_COLOR.into(),
-            Interaction::Hovered => HOVER_COLOR.into(),
-            Interaction::None => MENU_BUTTON_COLOR.into(),
-        }
-    }
-}
-
-pub fn generate_button(
-    mut buttons: Query<&Interaction, (Changed<Interaction>, With<Generate>)>,
-    mut playfield: ResMut<Playfield>
-) {
-    if let Ok(interaction) = buttons.get_single_mut() {
-        match *interaction {
-            Interaction::Pressed => playfield.generate(),
-            Interaction::Hovered => {}
-            Interaction::None => {}
-        }
-    }
-}
-
-pub fn solve_button(
-    mut buttons: Query<&Interaction, (Changed<Interaction>, With<Solve>)>,
-    mut playfield: ResMut<Playfield>
-) {
-    if let Ok(interaction) = buttons.get_single_mut() {
-        match *interaction {
-            Interaction::Pressed => playfield.solve(),
-            Interaction::Hovered => {}
-            Interaction::None => {}
-        }
     }
 }
 

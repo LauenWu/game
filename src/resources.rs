@@ -42,12 +42,11 @@ const VALUES_BIN_INV:[u16;9] = [
     0b1111111011111111,
 ];
 
-const LEVEL:u8 = 55;
-
 #[derive(Resource)]
 pub struct Playfield {
     pub values: Array2D<u8>,
-    pub errors: Array2D<bool>,
+    errors: Array2D<bool>,
+    solution: Option<Array2D<u8>>,
     pub fixed: Array2D<bool>,
     poss_rows: [u16; 9],
     poss_cols: [u16; 9],
@@ -55,6 +54,7 @@ pub struct Playfield {
     solved: bool,
     pub show_errors: bool,
     pub status_text: String,
+    pub difficulty: f32,
 }
 
 impl Playfield {
@@ -62,6 +62,7 @@ impl Playfield {
         Playfield {
             values: Array2D::filled_with(0, ROW_COUNT as usize, COL_COUNT as usize),
             errors: Array2D::filled_with(false, ROW_COUNT as usize, COL_COUNT as usize),
+            solution: Option::None,
             fixed: Array2D::filled_with(false, ROW_COUNT as usize, COL_COUNT as usize),
             poss_rows: [0b1111111111111111u16; 9],
             poss_cols: [0b1111111111111111u16; 9],
@@ -69,6 +70,26 @@ impl Playfield {
             solved: false,
             show_errors: false,
             status_text: format!(""),
+            difficulty: 40.0,
+        }
+    }
+
+    pub fn is_error(&self, row:usize, col:usize) -> bool {
+        let error = self.errors[(row, col)];
+        match self.solution.as_ref() {
+            None => error,
+            Some(s) => {
+                let val = self.values[(row, col)];
+                if val == 0 {
+                    error
+                } else {
+                    if s[(row, col)] == val {
+                        error
+                    } else {
+                        true
+                    }
+                }
+            }
         }
     }
 
@@ -156,14 +177,14 @@ impl Playfield {
     }
 
     fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
-        if removed_count >= LEVEL {
+        if removed_count >= self.difficulty as u8 {
             if self.multiple_solutions_(0) == 1 {
                 return true;
             }
             return false;
         }
 
-        if removed_count > 35 && self.multiple_solutions_(0) > 1 {
+        if removed_count > 25 && self.multiple_solutions_(0) > 1 {
             return false;
         }
 
@@ -252,7 +273,7 @@ impl Playfield {
     fn has_error(&self) -> bool {
         for i in 0..9 {
             for j in 0..9 {
-                if self.errors[(i,j)] {
+                if self.is_error(i, j) {
                     return true;
                 }
             }
@@ -287,7 +308,7 @@ impl Playfield {
         if !self.solve_random_(0) {
             panic!("No solution found");
         }
-        
+        let mut solution = self.values.clone();
         if !self.generate_(cursor_random_mask, 0, 0) {
             panic!("No solution generated");
         }
@@ -295,9 +316,12 @@ impl Playfield {
         let values = self.values.clone();
         for i in 0..9 {
             for j in 0..9 {
+                solution[(i,j)] = values_random_mask[(solution[(i,j)] - 1) as usize];
                 self.reset_value(i,j);
             }
         }
+
+        self.solution = Option::Some(solution);
 
         for i in 0..9 {
             for j in 0..9 {
@@ -306,7 +330,8 @@ impl Playfield {
                     self.fixed[(i, j)] = false;
                     continue;
                 }
-                self.set_value(i,j, values_random_mask[(val - 1) as usize]);
+                let random_val = values_random_mask[(val - 1) as usize];
+                self.set_value(i,j, random_val);
                 self.fixed[(i, j)] = true;
             }
         }
