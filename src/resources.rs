@@ -177,19 +177,12 @@ impl Playfield {
     }
 
     fn generate_(&mut self, fields_queue: [usize; FIELDS_COUNT], cursor:usize, removed_count:u8) -> bool {
+        if cursor >= 81 || self.multiple_solutions_(0) > 1 {
+            return false;
+        }
+        
         if removed_count >= self.difficulty as u8 {
-            if self.multiple_solutions_(0) == 1 {
-                return true;
-            }
-            return false;
-        }
-
-        if removed_count > 25 && self.multiple_solutions_(0) > 1 {
-            return false;
-        }
-
-        if cursor >= 81 {
-            return false;
+            return true;
         }
 
         let field = FIELDS[fields_queue[cursor]];
@@ -504,11 +497,11 @@ mod tests {
     }
 }
 
-fn print_recursion_step(cursor:usize, sign:&str) {
-    let mut i = 0;
-    while i < cursor {
-        print!("{sign}");
-        i += 1;
-    }
-    println!("{sign}");
-}
+// fn print_recursion_step(cursor:usize, sign:&str) {
+//     let mut i = 0;
+//     while i < cursor {
+//         print!("{sign}");
+//         i += 1;
+//     }
+//     println!("{sign}");
+// }
